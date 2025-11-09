@@ -1,0 +1,1 @@
+# NerdWallet-Calculator iteration 15\n\nFixes:\n- First year shows no investment return; returns begin in year 2.\n- Both lines hoverable from the first year.\n- Tooltip circles no longer clipped.\n\nRun:\n```bash\nnpm install\nnpm run dev\n```\nOpen http://localhost:3000\n
