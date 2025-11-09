@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "node --enable-source-maps ./node_modules/vite/bin/vite.js build",
     "dev": "vite",
-    "build": "npx vite build",
     "preview": "vite preview --port 3000",
     "server": "node server/proxy.js",
     "update:assets": "node scripts/generateAssets.js",
