@@ -32,7 +32,7 @@ export default function WhatIfTab() {
   const todayISO = new Date().toISOString().slice(0, 10);
   const [assets] = useState(assetList);
   const [symbol, setSymbol] = useState(assets[0].symbol);
-  const [amount, setAmount] = useState(10000);
+  const [amount, setAmount] = useState("10,000"); // store as string with commas
   const [startDate, setStartDate] = useState("2015-01-01");
 
   const [loading, setLoading] = useState(false);
@@ -45,12 +45,27 @@ export default function WhatIfTab() {
   const [shares, setShares] = useState(null);
   const [dataSource, setDataSource] = useState("");
 
-  // ✅ Search dropdown state
   const [searchTerm, setSearchTerm] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(-1);
 
-  // 🧠 Filter assets by search
+  // Format numeric input with commas
+  const handleAmountChange = (e) => {
+    const rawValue = e.target.value.replace(/,/g, "");
+    const numericValue = Math.max(0, Number(rawValue) || 0);
+    setAmount(
+      numericValue.toLocaleString("en-US", {
+        maximumFractionDigits: 0,
+      })
+    );
+  };
+
+  const numericAmount = useMemo(
+    () => Number(amount.replace(/,/g, "")),
+    [amount]
+  );
+
+  // 🧠 Filter assets
   const filteredAssets = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
     if (!term) return assets;
@@ -61,7 +76,7 @@ export default function WhatIfTab() {
     );
   }, [searchTerm, assets]);
 
-  // 🕓 Latest cache update timestamp
+  // 🕓 Cache update
   const latestUpdate = useMemo(() => {
     const times = Object.values(priceCache)
       .map((e) => new Date(e.lastUpdated || 0).getTime())
@@ -76,33 +91,31 @@ export default function WhatIfTab() {
   );
 
   const minDate = selectedAsset?.inception ?? "1980-01-01";
-
   const startClose = series.length ? series[0].close : null;
   const lastClose = series.length ? series[series.length - 1].close : null;
 
   const currentValue = useMemo(() => {
-    if (!startClose || !lastClose || !amount) return 0;
-    return (amount / startClose) * lastClose;
-  }, [startClose, lastClose, amount]);
+    if (!startClose || !lastClose || !numericAmount) return 0;
+    return (numericAmount / startClose) * lastClose;
+  }, [startClose, lastClose, numericAmount]);
 
   const totalReturnPct = useMemo(() => {
-    if (!amount || !currentValue) return 0;
-    return (currentValue / amount - 1) * 100;
-  }, [amount, currentValue]);
+    if (!numericAmount || !currentValue) return 0;
+    return (currentValue / numericAmount - 1) * 100;
+  }, [numericAmount, currentValue]);
 
   const annualizedReturnPct = useMemo(() => {
-    if (!series.length || !amount || !currentValue) return 0;
+    if (!series.length || !numericAmount || !currentValue) return 0;
     const start = new Date(series[0].date);
     const end = new Date(series[series.length - 1].date);
     const years = (end - start) / (365.25 * 24 * 3600 * 1000);
     if (years <= 0) return 0;
-    return (Math.pow(currentValue / amount, 1 / years) - 1) * 100;
-  }, [series, amount, currentValue]);
+    return (Math.pow(currentValue / numericAmount, 1 / years) - 1) * 100;
+  }, [series, numericAmount, currentValue]);
 
-  // 💰 Total profit/loss
   const totalProfit = useMemo(
-    () => currentValue - amount,
-    [currentValue, amount]
+    () => currentValue - numericAmount,
+    [currentValue, numericAmount]
   );
 
   const validateDate = (inputDate) => {
@@ -124,9 +137,7 @@ export default function WhatIfTab() {
     setDataSource("");
     console.log("▶️ run() triggered with symbol:", symbol);
 
-    // 🧩 Prevent fetch when symbol is blank
     if (!symbol) {
-      console.warn("⚠️ Skipping fetch — no symbol selected.");
       setLoading(false);
       return;
     }
@@ -138,7 +149,6 @@ export default function WhatIfTab() {
         return;
       }
 
-      // 1️⃣ Cached data first
       const cache = priceCache[symbol];
       if (cache && cache.data?.length) {
         let filtered = cache.data.filter(
@@ -153,7 +163,7 @@ export default function WhatIfTab() {
         }
 
         if (filtered.length > 0) {
-          const s = amount / filtered[0].close;
+          const s = numericAmount / filtered[0].close;
           const mapped = filtered.map((d) => ({
             date: d.date,
             close: d.close,
@@ -169,17 +179,7 @@ export default function WhatIfTab() {
         }
       }
 
-      console.log(
-        "📡 Calling fetchYahooChart with:",
-        symbol,
-        startDate,
-        todayISO
-      );
-
-      // 2️⃣ Yahoo fallback (proxy)
       const data = await fetchYahooChart(symbol, startDate, todayISO, "1wk");
-      console.log("📦 fetchYahooChart returned:", data?.length, "records");
-
       if (!data?.length) {
         setSeries([]);
         setError("No data returned. Try different inputs.");
@@ -192,7 +192,7 @@ export default function WhatIfTab() {
           data.push({ date: todayISO, close: last.close });
         }
 
-        const s = amount / data[0].close;
+        const s = numericAmount / data[0].close;
         const mapped = data.map((d) => ({
           date: d.date,
           close: d.close,
@@ -213,13 +213,11 @@ export default function WhatIfTab() {
     }
   }
 
-  // ✅ Debounced auto-update
   useEffect(() => {
     const timer = setTimeout(run, 500);
     return () => clearTimeout(timer);
-  }, [symbol, startDate, amount]);
+  }, [symbol, startDate, numericAmount]);
 
-  // 🕛 Auto-refresh at midnight
   useEffect(() => {
     const now = new Date();
     const nextMidnight = new Date(
@@ -231,12 +229,10 @@ export default function WhatIfTab() {
       5
     );
     const delay = nextMidnight.getTime() - now.getTime();
-
     const timer = setTimeout(() => run(), delay);
     return () => clearTimeout(timer);
-  }, [symbol, startDate, amount]);
+  }, [symbol, startDate, numericAmount]);
 
-  // 🖱️ Close dropdown when clicking outside
   useEffect(() => {
     const handler = (e) => {
       if (!e.target.closest(".asset-search-container")) setShowDropdown(false);
@@ -245,7 +241,6 @@ export default function WhatIfTab() {
     return () => document.removeEventListener("click", handler);
   }, []);
 
-  // 🎹 Keyboard navigation
   const handleKeyDown = (e) => {
     if (!showDropdown) return;
     if (e.key === "ArrowDown") {
@@ -258,228 +253,260 @@ export default function WhatIfTab() {
       );
     } else if (e.key === "Enter" && highlightIndex >= 0) {
       const a = filteredAssets[highlightIndex];
-      if (a) {
-        const newSymbol = a.symbol;
-        const newAsset = assets.find((x) => x.symbol === newSymbol);
-        setSymbol(newSymbol);
-        if (new Date(startDate) < new Date(newAsset.inception))
-          setStartDate(newAsset.inception);
-        setSearchTerm(`${a.symbol} — ${a.name}`);
-        setShowDropdown(false);
-        setError("");
-      }
+      selectAsset(a);
     } else if (e.key === "Escape") setShowDropdown(false);
   };
 
+  const selectAsset = (asset) => {
+    setSymbol(asset.symbol);
+    setSearchTerm("");
+    if (new Date(startDate) < new Date(asset.inception))
+      setStartDate(asset.inception);
+    setShowDropdown(false);
+    setError("");
+  };
+
+  // 🌙 Global fixes for date picker + tab contrast
+  const globalStyle = `
+    /* Fix calendar icon visibility in dark mode */
+    input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: none;
+    }
+
+    .dark input[type="date"]::-webkit-calendar-picker-indicator {
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'><path d='M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 14H5V9h14v9z'/></svg>");
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 18px 18px;
+      opacity: 0.95;
+      cursor: pointer;
+    }
+
+    .dark input[type="date"]:hover::-webkit-calendar-picker-indicator {
+      opacity: 1;
+    }
+
+    @-moz-document url-prefix() {
+      .dark input[type="date"] {
+        filter: invert(1) brightness(2);
+      }
+    }
+
+    /* Improve tab contrast in light mode */
+    .tab-btn {
+      transition: all 0.2s ease-in-out;
+      color: #1e293b; /* slate-800 */
+      background-color: #f1f5f9; /* light gray */
+    }
+    .tab-btn:hover {
+      background-color: #e2e8f0;
+    }
+    .tab-btn.active {
+      background-color: #0284c7; /* sky-600 */
+      color: white;
+    }
+
+    .dark .tab-btn {
+      background-color: #1e293b;
+      color: #cbd5e1;
+    }
+    .dark .tab-btn.active {
+      background-color: #0ea5e9;
+      color: white;
+    }
+  `;
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <section className="panel">
-        <h2 className="mb-4 text-xl font-bold">What if?</h2>
+    <>
+      <style>{globalStyle}</style>
 
-        <div className="space-y-4">
-          {/* ✅ Searchable Asset Selector */}
-          <div className="relative asset-search-container">
-            <label className="text-sm">Asset</label>
-            <input
-              type="text"
-              className="num mt-1 w-full"
-              placeholder="Search or select asset…"
-              value={searchTerm}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSearchTerm(val);
-                setShowDropdown(true);
-                setHighlightIndex(-1);
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section className="panel">
+          <h2 className="mb-4 text-xl font-bold">What if?</h2>
 
-                // 🧠 keep symbol valid
-                if (val.trim() === "") {
-                  setSymbol(assets[0].symbol);
-                }
-              }}
-              onFocus={() => {
-                setShowDropdown(true);
-                if (!searchTerm && symbol) {
-                  const current = assets.find((a) => a.symbol === symbol);
-                  if (current)
-                    setSearchTerm(`${current.symbol} — ${current.name}`);
-                }
-              }}
-              onKeyDown={handleKeyDown}
-            />
-
-            {showDropdown && (
-              <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-white dark:bg-gray-800 shadow-lg text-sm">
-                {filteredAssets.length === 0 && (
-                  <li className="px-3 py-2 text-slate-400">No matches</li>
-                )}
-                {filteredAssets.map((a, i) => (
-                  <li
-                    key={a.symbol}
-                    ref={(el) => {
-                      if (i === highlightIndex && el) {
-                        el.scrollIntoView({
-                          block: "nearest",
-                          behavior: "smooth",
-                        });
-                      }
-                    }}
-                    className={`px-3 py-2 cursor-pointer hover:bg-sky-100 dark:hover:bg-gray-700 ${
-                      i === highlightIndex ? "bg-sky-200 dark:bg-gray-700" : ""
-                    }`}
-                    onMouseEnter={() => setHighlightIndex(i)}
-                    onClick={() => {
-                      const newSymbol = a.symbol;
-                      const newAsset = assets.find(
-                        (x) => x.symbol === newSymbol
-                      );
-                      setSymbol(newSymbol);
-                      if (new Date(startDate) < new Date(newAsset.inception))
-                        setStartDate(newAsset.inception);
-                      setSearchTerm(`${a.symbol} — ${a.name}`);
-                      setShowDropdown(false);
-                      setError("");
-                    }}
-                  >
-                    {a.symbol} — {a.name}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <p className="text-xs text-slate-400 mt-1">Earliest: {minDate}</p>
-          </div>
-
-          {/* Date input */}
-          <div className="relative">
-            <label className="text-sm">Investment date</label>
-            <input
-              type="date"
-              className="num mt-1 w-full"
-              min={minDate}
-              max={todayISO}
-              value={startDate}
-              onChange={(e) => {
-                const d = e.target.value;
-                setStartDate(d);
-                validateDate(d);
-              }}
-            />
-            {tooltip && (
-              <div className="absolute left-0 mt-1 px-3 py-1 text-xs rounded bg-yellow-100 dark:bg-gray-800 text-yellow-800 dark:text-amber-300 border border-yellow-400 dark:border-amber-500">
-                ⚠️ {selectedAsset.name} wasn’t tradable until {minDate}
-              </div>
-            )}
-          </div>
-
-          {/* Amount */}
-          <div>
-            <label className="text-sm">Investment amount</label>
-            <div className="relative mt-1">
-              <span className="absolute left-3 top-2.5 text-slate-400">$</span>
+          <div className="space-y-4">
+            {/* Asset Search */}
+            <div className="relative asset-search-container">
+              <label className="text-sm">Asset</label>
               <input
-                type="number"
-                className="num pl-7"
-                value={amount}
-                onChange={(e) =>
-                  setAmount(Math.max(0, Number(e.target.value) || 0))
+                type="text"
+                className="num mt-1 w-full"
+                placeholder={
+                  selectedAsset
+                    ? `${selectedAsset.symbol} — ${selectedAsset.name}`
+                    : "Search or select asset..."
                 }
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setShowDropdown(true);
+                }}
+                onFocus={() => {
+                  setSearchTerm("");
+                  setShowDropdown(true);
+                }}
+                onKeyDown={handleKeyDown}
               />
+
+              {showDropdown && (
+                <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-white dark:bg-gray-800 shadow-lg text-sm">
+                  {filteredAssets.length === 0 && (
+                    <li className="px-3 py-2 text-slate-400">No matches</li>
+                  )}
+                  {filteredAssets.map((a, i) => (
+                    <li
+                      key={a.symbol}
+                      className={`px-3 py-2 cursor-pointer hover:bg-sky-100 dark:hover:bg-gray-700 ${
+                        i === highlightIndex
+                          ? "bg-sky-200 dark:bg-gray-700"
+                          : ""
+                      }`}
+                      onMouseEnter={() => setHighlightIndex(i)}
+                      onClick={() => selectAsset(a)}
+                    >
+                      {a.symbol} — {a.name}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="text-xs text-slate-400 mt-1">Earliest: {minDate}</p>
             </div>
+
+            {/* Date Input */}
+            <div className="relative">
+              <label className="text-sm">Investment date</label>
+              <input
+                type="date"
+                className="num mt-1 w-full"
+                min={minDate}
+                max={todayISO}
+                value={startDate}
+                onChange={(e) => {
+                  const d = e.target.value;
+                  setStartDate(d);
+                  validateDate(d);
+                }}
+              />
+              {tooltip && (
+                <div className="absolute left-0 mt-1 px-3 py-1 text-xs rounded bg-yellow-100 dark:bg-gray-800 text-yellow-800 dark:text-amber-300 border border-yellow-400 dark:border-amber-500">
+                  ⚠️ {selectedAsset.name} wasn’t tradable until {minDate}
+                </div>
+              )}
+            </div>
+
+            {/* Amount */}
+            <div>
+              <label className="text-sm">Investment amount</label>
+              <div className="relative mt-1">
+                <span className="absolute left-3 top-2.5 text-slate-400">
+                  $
+                </span>
+                <input
+                  type="text"
+                  className="num pl-7"
+                  value={amount}
+                  onChange={handleAmountChange}
+                />
+              </div>
+            </div>
+
+            {/* Info + Metrics */}
+            {dataSource && (
+              <p className="text-xs text-slate-500 italic">
+                Loaded from <b>{dataSource}</b>
+              </p>
+            )}
+            {latestUpdate && (
+              <p className="text-xs text-slate-400 italic">
+                🕓 Cache updated {formatDate(latestUpdate)}
+              </p>
+            )}
+
+            {/* Prices */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+              <div className="card">
+                <div className="text-xs opacity-70">Price on {startDate}</div>
+                <div className="text-lg font-semibold">
+                  {startPrice ? formatCurrency(startPrice) : "—"}
+                </div>
+              </div>
+              <div className="card">
+                <div className="text-xs opacity-70">Current price</div>
+                <div className="text-lg font-semibold">
+                  {currentPrice ? (
+                    <>
+                      {formatCurrency(currentPrice)}{" "}
+                      <span className="text-xs text-slate-400">
+                        (as of {formatDate(series[series.length - 1]?.date)})
+                      </span>
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </div>
+              </div>
+              <div className="card">
+                <div className="text-xs opacity-70">Shares</div>
+                <div className="text-lg font-semibold">
+                  {shares ? formatNumber(shares) : "—"}
+                </div>
+              </div>
+            </div>
+
+            {/* Returns + Profit */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-2">
+              <div className="card">
+                <div className="text-xs opacity-70">Current Value</div>
+                <div className="text-xl font-bold">
+                  {formatCurrency(currentValue)}
+                </div>
+              </div>
+              <div className="card">
+                <div className="text-xs opacity-70">Total Return</div>
+                <div className="text-xl font-bold">
+                  {Number.isFinite(totalReturnPct)
+                    ? `${totalReturnPct.toFixed(1)}%`
+                    : "—"}
+                </div>
+              </div>
+              <div className="card">
+                <div className="text-xs opacity-70">Annualized</div>
+                <div className="text-xl font-bold">
+                  {Number.isFinite(annualizedReturnPct)
+                    ? `${annualizedReturnPct.toFixed(2)}%`
+                    : "—"}
+                </div>
+              </div>
+              <div
+                className={`card ${
+                  totalProfit > 0
+                    ? "border-green-400 text-green-600 dark:text-green-400"
+                    : totalProfit < 0
+                    ? "border-red-400 text-red-600 dark:text-red-400"
+                    : ""
+                }`}
+              >
+                <div className="text-xs opacity-70">Total Profit</div>
+                <div className="text-xl font-bold">
+                  {formatCurrency(totalProfit)}
+                </div>
+              </div>
+            </div>
+
+            {error && <p className="text-xs text-red-500 italic">{error}</p>}
           </div>
+        </section>
 
-          {/* Info */}
-          {dataSource && (
-            <p className="text-xs text-slate-500 italic">
-              Loaded from <b>{dataSource}</b>
-            </p>
-          )}
-          {latestUpdate && (
-            <p className="text-xs text-slate-400 italic">
-              🕓 Cache updated {formatDate(latestUpdate)}
-            </p>
-          )}
-
-          {/* Prices */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
-            <div className="card">
-              <div className="text-xs opacity-70">Price on {startDate}</div>
-              <div className="text-lg font-semibold">
-                {startPrice ? formatCurrency(startPrice) : "—"}
-              </div>
-            </div>
-            <div className="card">
-              <div className="text-xs opacity-70">Current price</div>
-              <div className="text-lg font-semibold">
-                {currentPrice ? (
-                  <>
-                    {formatCurrency(currentPrice)}{" "}
-                    <span className="text-xs text-slate-400">
-                      (as of {formatDate(series[series.length - 1]?.date)})
-                    </span>
-                  </>
-                ) : (
-                  "—"
-                )}
-              </div>
-            </div>
-            <div className="card">
-              <div className="text-xs opacity-70">Shares</div>
-              <div className="text-lg font-semibold">
-                {shares ? formatNumber(shares) : "—"}
-              </div>
-            </div>
+        {/* Chart */}
+        <section className="card">
+          <h2 className="text-center text-xl font-bold mb-2">
+            Value Over Time
+          </h2>
+          <div className="w-full h-96">
+            <HistoricalValueChart data={series} />
           </div>
-
-          {/* Returns + Profit */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-2">
-            <div className="card">
-              <div className="text-xs opacity-70">Current Value</div>
-              <div className="text-xl font-bold">
-                {formatCurrency(currentValue)}
-              </div>
-            </div>
-            <div className="card">
-              <div className="text-xs opacity-70">Total Return</div>
-              <div className="text-xl font-bold">
-                {Number.isFinite(totalReturnPct)
-                  ? `${totalReturnPct.toFixed(1)}%`
-                  : "—"}
-              </div>
-            </div>
-            <div className="card">
-              <div className="text-xs opacity-70">Annualized</div>
-              <div className="text-xl font-bold">
-                {Number.isFinite(annualizedReturnPct)
-                  ? `${annualizedReturnPct.toFixed(2)}%`
-                  : "—"}
-              </div>
-            </div>
-            <div
-              className={`card ${
-                totalProfit > 0
-                  ? "border-green-400 text-green-600 dark:text-green-400"
-                  : totalProfit < 0
-                  ? "border-red-400 text-red-600 dark:text-red-400"
-                  : ""
-              }`}
-            >
-              <div className="text-xs opacity-70">Total Profit</div>
-              <div className="text-xl font-bold">
-                {formatCurrency(totalProfit)}
-              </div>
-            </div>
-          </div>
-
-          {error && <p className="text-xs text-red-500 italic">{error}</p>}
-        </div>
-      </section>
-
-      {/* Chart */}
-      <section className="card">
-        <h2 className="text-center text-xl font-bold mb-2">Value Over Time</h2>
-        <div className="w-full h-96">
-          <HistoricalValueChart data={series} />
-        </div>
-      </section>
-    </div>
+        </section>
+      </div>
+    </>
   );
 }
