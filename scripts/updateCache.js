@@ -1,9 +1,15 @@
+// scripts/updateCache.js
 import fs from "fs";
 import path from "path";
 import fetch from "node-fetch";
 import assets from "../src/data/assets.json" assert { type: "json" };
+import { fileURLToPath } from "url";
 
-const pricesPath = path.resolve("src/data/prices.json");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// NOTE: use absolute path so it works on Render too
+const pricesPath = path.resolve(__dirname, "../src/data/prices.json");
 const prices = fs.existsSync(pricesPath)
   ? JSON.parse(fs.readFileSync(pricesPath))
   : {};
@@ -16,10 +22,17 @@ async function fetchRecent(symbol) {
   )}&period2=${Math.floor(
     end.getTime() / 1000
   )}&events=history&includeAdjustedClose=true`;
+
   const res = await fetch(url);
+  if (!res.ok) {
+    console.warn(`⚠️ Yahoo returned ${res.status} for ${symbol}`);
+    return [];
+  }
+
   const json = await res.json();
   const ts = json?.chart?.result?.[0]?.timestamp || [];
   const closes = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
+
   return ts
     .map((t, i) => ({
       date: new Date(t * 1000).toISOString().split("T")[0],
@@ -28,19 +41,24 @@ async function fetchRecent(symbol) {
     .filter((d) => d.close != null);
 }
 
-async function update(symbolArg) {
+export async function update(symbolArg) {
   const end = new Date();
   const all = symbolArg ? assets.filter((a) => a.symbol === symbolArg) : assets;
+
   for (const asset of all) {
     console.log(`🔄 Updating ${asset.symbol}`);
     const recent = await fetchRecent(asset.symbol);
     if (!recent.length) continue;
+
     if (!prices[asset.symbol]) prices[asset.symbol] = { data: [] };
     const existing = prices[asset.symbol].data || [];
+
+    // merge old + new (favor new)
     const merged = [
       ...existing.filter((e) => !recent.find((r) => r.date === e.date)),
       ...recent,
     ];
+
     prices[asset.symbol] = {
       ...asset,
       lastUpdated: new Date().toISOString(),
@@ -52,5 +70,8 @@ async function update(symbolArg) {
   console.log(`✅ Cache updated → ${pricesPath}`);
 }
 
-const arg = process.argv.find((a) => a.startsWith("--symbol="));
-update(arg ? arg.split("=")[1] : null);
+// 🚀 CLI mode (what you already have today)
+if (process.argv[1] === __filename) {
+  const arg = process.argv.find((a) => a.startsWith("--symbol="));
+  update(arg ? arg.split("=")[1] : null);
+}
