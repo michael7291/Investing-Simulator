@@ -32,7 +32,7 @@ export default function WhatIfTab() {
   const todayISO = new Date().toISOString().slice(0, 10);
   const [assets] = useState(assetList);
   const [symbol, setSymbol] = useState(assets[0].symbol);
-  const [amount, setAmount] = useState("10,000"); // store as string with commas
+  const [amount, setAmount] = useState("10,000");
   const [startDate, setStartDate] = useState("2015-01-01");
 
   const [loading, setLoading] = useState(false);
@@ -49,7 +49,7 @@ export default function WhatIfTab() {
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(-1);
 
-  // Format numeric input with commas
+  // ✅ Format numeric input with commas
   const handleAmountChange = (e) => {
     const rawValue = e.target.value.replace(/,/g, "");
     const numericValue = Math.max(0, Number(rawValue) || 0);
@@ -213,11 +213,13 @@ export default function WhatIfTab() {
     }
   }
 
+  // ✅ Auto-refresh debounce
   useEffect(() => {
     const timer = setTimeout(run, 500);
     return () => clearTimeout(timer);
   }, [symbol, startDate, numericAmount]);
 
+  // ✅ Daily refresh at midnight
   useEffect(() => {
     const now = new Date();
     const nextMidnight = new Date(
@@ -233,6 +235,7 @@ export default function WhatIfTab() {
     return () => clearTimeout(timer);
   }, [symbol, startDate, numericAmount]);
 
+  // ✅ Dropdown click-away handler
   useEffect(() => {
     const handler = (e) => {
       if (!e.target.closest(".asset-search-container")) setShowDropdown(false);
@@ -266,46 +269,38 @@ export default function WhatIfTab() {
     setError("");
   };
 
-  // 🌙 Global fixes for date picker + tab contrast
+  // 🌙 Improved global style: date picker + tab button contrast
   const globalStyle = `
-    /* Fix calendar icon visibility in dark mode */
+    /* Calendar icon fix */
     input[type="date"]::-webkit-calendar-picker-indicator {
       filter: none;
     }
-
     .dark input[type="date"]::-webkit-calendar-picker-indicator {
-      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'><path d='M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 14H5V9h14v9z'/></svg>");
-      background-repeat: no-repeat;
-      background-position: center;
-      background-size: 18px 18px;
-      opacity: 0.95;
+      filter: invert(1) brightness(1.3);
+      opacity: 0.9;
       cursor: pointer;
     }
 
-    .dark input[type="date"]:hover::-webkit-calendar-picker-indicator {
-      opacity: 1;
-    }
-
+    /* Firefox calendar fix */
     @-moz-document url-prefix() {
       .dark input[type="date"] {
-        filter: invert(1) brightness(2);
+        filter: invert(1) brightness(1.4);
       }
     }
 
-    /* Improve tab contrast in light mode */
+    /* Tabs contrast fix */
     .tab-btn {
       transition: all 0.2s ease-in-out;
-      color: #1e293b; /* slate-800 */
-      background-color: #f1f5f9; /* light gray */
+      color: #1e293b;
+      background-color: #f8fafc;
     }
     .tab-btn:hover {
       background-color: #e2e8f0;
     }
     .tab-btn.active {
-      background-color: #0284c7; /* sky-600 */
+      background-color: #0284c7;
       color: white;
     }
-
     .dark .tab-btn {
       background-color: #1e293b;
       color: #cbd5e1;

@@ -11,7 +11,8 @@
     "update:assets": "node scripts/generateAssets.js",
     "update:cache": "node scripts/cachePrices.js",
     "update:incremental": "node scripts/updateCache.js",
-    "update:weekly": "npm run update:assets && npm run update:incremental"
+    "update:weekly": "npm run update:assets && npm run update:incremental",
+    "update:cron": "node scripts/updateCache.js"
   },
   "dependencies": {
     "chart.js": "^4.4.1",

@@ -14,11 +14,13 @@ app.use(express.json());
 const memoryCache = {};
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-// ✅ Dynamically load assets.json safely (works on Windows/Mac/Linux)
+// ✅ Resolve paths safely (works everywhere)
 const __dirname = path.resolve();
 const assetsPath = path.join(__dirname, "src", "data", "assets.json");
+const pricesPath = path.join(__dirname, "src", "data", "prices.json");
 let assets = [];
 
+// ✅ Load assets.json
 try {
   const data = fs.readFileSync(assetsPath, "utf-8");
   assets = JSON.parse(data);
@@ -27,7 +29,31 @@ try {
   console.error("❌ Failed to load assets.json:", err.message);
 }
 
-// 🧮 Helper: check if cache is fresh (< 24h)
+// ✅ Load prices.json at startup (so UI always shows latest cache)
+try {
+  if (fs.existsSync(pricesPath)) {
+    const priceData = JSON.parse(fs.readFileSync(pricesPath, "utf-8"));
+    Object.entries(priceData).forEach(([symbol, info]) => {
+      memoryCache[symbol.toUpperCase()] = {
+        lastUpdated: info.lastUpdated,
+        data: info.data || [],
+      };
+    });
+    console.log(
+      `💾 Initialized memory cache from prices.json (${
+        Object.keys(memoryCache).length
+      } symbols)`
+    );
+  } else {
+    console.warn(
+      "⚠️ No prices.json found — cache will be empty until fetched."
+    );
+  }
+} catch (err) {
+  console.error("❌ Failed to load prices.json:", err.message);
+}
+
+// 🧮 Check if cache entry is fresh (< 24h)
 function isFresh(symbol) {
   const entry = memoryCache[symbol];
   if (!entry || !entry.lastUpdated) return false;
@@ -49,6 +75,7 @@ async function fetchYahooChart(symbol, startDate, endDate, interval = "1d") {
 
   const quotes = result.indicators?.quote?.[0];
   const timestamps = result.timestamp;
+
   return timestamps.map((t, i) => ({
     date: new Date(t * 1000).toISOString().slice(0, 10),
     close: quotes.close[i],
@@ -88,6 +115,9 @@ app.get("/api/chart/:symbol", async (req, res) => {
       lastUpdated: memoryCache[symbol].lastUpdated,
       data,
     });
+
+    // ✅ Write back to prices.json for persistence
+    persistCache();
   } catch (err) {
     console.error(`❌ Failed to fetch ${symbol}:`, err.message);
     if (memoryCache[symbol]) {
@@ -118,20 +148,36 @@ app.post("/api/refresh/:symbol", async (req, res) => {
       data,
     };
     console.log(`♻️ Manually refreshed ${symbol} (${data.length} records)`);
+
+    persistCache();
     res.json({ ok: true, refreshed: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🌐 Proxy server running on port ${PORT}`));
+/* -------------------------------------------------------------------------- */
+/* 💾 Helper: Persist in-memory cache to prices.json                          */
+/* -------------------------------------------------------------------------- */
+function persistCache() {
+  try {
+    const out = {};
+    for (const [symbol, entry] of Object.entries(memoryCache)) {
+      out[symbol] = {
+        lastUpdated: entry.lastUpdated,
+        data: entry.data,
+      };
+    }
+    fs.writeFileSync(pricesPath, JSON.stringify(out, null, 2), "utf-8");
+    console.log("💾 Persisted memory cache → src/data/prices.json");
+  } catch (err) {
+    console.error("⚠️ Failed to persist cache:", err.message);
+  }
+}
 
 /* -------------------------------------------------------------------------- */
 /* 🕒 DAILY AUTO-REFRESH FOR ALL ASSETS                                       */
 /* -------------------------------------------------------------------------- */
-
-// Runs every day at 00:10 AM server time
 cron.schedule("10 0 * * *", async () => {
   console.log("⏰ Starting daily refresh for all assets…");
 
@@ -146,11 +192,13 @@ cron.schedule("10 0 * * *", async () => {
         data,
       };
       console.log(`✅ Auto-refreshed ${symbol} (${data.length} records)`);
-      await new Promise((r) => setTimeout(r, 500)); // prevent rate limiting
+      await new Promise((r) => setTimeout(r, 500));
     } catch (err) {
       console.error(`❌ Failed to refresh ${symbol}:`, err.message);
     }
   }
+
+  persistCache();
 
   // Save backup snapshot daily
   const backupPath = path.join(__dirname, "server", "cache_backup.json");
@@ -163,3 +211,6 @@ cron.schedule("10 0 * * *", async () => {
 
   console.log("✅ Daily refresh completed for all assets.");
 });
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🌐 Proxy server running on port ${PORT}`));
