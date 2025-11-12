@@ -49,22 +49,27 @@ export default function WhatIfTab() {
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(-1);
 
-  // ✅ Load latest prices.json dynamically from backend
+  // ✅ Load latest prices.json dynamically from backend (Render-compatible)
   useEffect(() => {
-    const baseUrl =
-      import.meta.env.PROD && window.location.origin
-        ? `${window.location.origin.replace(/\/$/, "")}/api/prices`
-        : "http://localhost:5000/api/prices";
+    async function loadCache() {
+      try {
+        const apiBase = import.meta.env.PROD
+          ? "https://investing-simulator.onrender.com"
+          : "http://localhost:5000";
 
-    fetch(baseUrl + "?_ts=" + Date.now())
-      .then((res) => res.json())
-      .then((data) => {
+        const res = await fetch(`${apiBase}/api/prices?_ts=${Date.now()}`, {
+          headers: { Accept: "application/json" },
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
         setPriceCache(data);
-        console.log("✅ Loaded fresh price cache from backend");
-      })
-      .catch((err) =>
-        console.error("❌ Failed to fetch /api/prices:", err.message)
-      );
+        console.log("✅ Loaded fresh price cache from backend:", apiBase);
+      } catch (err) {
+        console.error("❌ Failed to fetch /api/prices:", err.message);
+      }
+    }
+    loadCache();
   }, []);
 
   // ✅ Format numeric input with commas

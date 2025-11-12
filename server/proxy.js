@@ -14,13 +14,13 @@ app.use(express.json());
 const memoryCache = {};
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-// ✅ Resolve paths safely (works everywhere)
+// ✅ Resolve paths safely (works in dev + Render)
 const __dirname = path.resolve();
 const assetsPath = path.join(__dirname, "src", "data", "assets.json");
 const pricesPath = path.join(__dirname, "src", "data", "prices.json");
 let assets = [];
 
-// ✅ Load assets.json
+// ✅ Load assets.json at startup
 try {
   const data = fs.readFileSync(assetsPath, "utf-8");
   assets = JSON.parse(data);
@@ -116,7 +116,6 @@ app.get("/api/chart/:symbol", async (req, res) => {
       data,
     });
 
-    // ✅ Write back to prices.json for persistence
     persistCache();
   } catch (err) {
     console.error(`❌ Failed to fetch ${symbol}:`, err.message);
@@ -163,8 +162,9 @@ app.get("/api/prices", (req, res) => {
   try {
     if (fs.existsSync(pricesPath)) {
       const data = fs.readFileSync(pricesPath, "utf-8");
+      res.type("application/json");
       res.setHeader("Cache-Control", "no-store");
-      res.json(JSON.parse(data));
+      res.send(data);
     } else {
       res.status(404).json({ error: "prices.json not found" });
     }
@@ -218,7 +218,7 @@ cron.schedule("10 0 * * *", async () => {
 
   persistCache();
 
-  // Save backup snapshot daily
+  // Save daily backup snapshot
   const backupPath = path.join(__dirname, "server", "cache_backup.json");
   try {
     fs.writeFileSync(backupPath, JSON.stringify(memoryCache, null, 2), "utf-8");
