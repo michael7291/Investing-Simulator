@@ -157,6 +157,24 @@ app.post("/api/refresh/:symbol", async (req, res) => {
 });
 
 /* -------------------------------------------------------------------------- */
+/* 🧩 NEW: Endpoint to serve latest prices.json to frontend                   */
+/* -------------------------------------------------------------------------- */
+app.get("/api/prices", (req, res) => {
+  try {
+    if (fs.existsSync(pricesPath)) {
+      const data = fs.readFileSync(pricesPath, "utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      res.json(JSON.parse(data));
+    } else {
+      res.status(404).json({ error: "prices.json not found" });
+    }
+  } catch (err) {
+    console.error("❌ Failed to serve /api/prices:", err.message);
+    res.status(500).json({ error: "Failed to load prices.json" });
+  }
+});
+
+/* -------------------------------------------------------------------------- */
 /* 💾 Helper: Persist in-memory cache to prices.json                          */
 /* -------------------------------------------------------------------------- */
 function persistCache() {

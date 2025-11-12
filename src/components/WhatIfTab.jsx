@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import HistoricalValueChart from "./HistoricalValueChart";
 import { fetchYahooChart } from "../services/yahoo";
 import assetList from "../data/assets.json";
-import priceCache from "../data/prices.json";
 
 function formatCurrency(v) {
   return new Intl.NumberFormat("en-US", {
@@ -35,6 +34,7 @@ export default function WhatIfTab() {
   const [amount, setAmount] = useState("10,000");
   const [startDate, setStartDate] = useState("2015-01-01");
 
+  const [priceCache, setPriceCache] = useState({});
   const [loading, setLoading] = useState(false);
   const [series, setSeries] = useState([]);
   const [error, setError] = useState("");
@@ -48,6 +48,24 @@ export default function WhatIfTab() {
   const [searchTerm, setSearchTerm] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(-1);
+
+  // ✅ Load latest prices.json dynamically from backend
+  useEffect(() => {
+    const baseUrl =
+      import.meta.env.PROD && window.location.origin
+        ? `${window.location.origin.replace(/\/$/, "")}/api/prices`
+        : "http://localhost:5000/api/prices";
+
+    fetch(baseUrl + "?_ts=" + Date.now())
+      .then((res) => res.json())
+      .then((data) => {
+        setPriceCache(data);
+        console.log("✅ Loaded fresh price cache from backend");
+      })
+      .catch((err) =>
+        console.error("❌ Failed to fetch /api/prices:", err.message)
+      );
+  }, []);
 
   // ✅ Format numeric input with commas
   const handleAmountChange = (e) => {
@@ -76,14 +94,14 @@ export default function WhatIfTab() {
     );
   }, [searchTerm, assets]);
 
-  // 🕓 Cache update
+  // 🕓 Compute latest update time dynamically
   const latestUpdate = useMemo(() => {
     const times = Object.values(priceCache)
       .map((e) => new Date(e.lastUpdated || 0).getTime())
       .filter((t) => t > 0);
     if (!times.length) return null;
     return new Date(Math.max(...times)).toISOString();
-  }, []);
+  }, [priceCache]);
 
   const selectedAsset = useMemo(
     () => assets.find((a) => a.symbol === symbol),
@@ -137,7 +155,8 @@ export default function WhatIfTab() {
     setDataSource("");
     console.log("▶️ run() triggered with symbol:", symbol);
 
-    if (!symbol) {
+    if (!symbol || !Object.keys(priceCache).length) {
+      console.warn("⚠️ Skipping fetch — no symbol or priceCache yet");
       setLoading(false);
       return;
     }
@@ -217,7 +236,7 @@ export default function WhatIfTab() {
   useEffect(() => {
     const timer = setTimeout(run, 500);
     return () => clearTimeout(timer);
-  }, [symbol, startDate, numericAmount]);
+  }, [symbol, startDate, numericAmount, priceCache]);
 
   // ✅ Daily refresh at midnight
   useEffect(() => {
@@ -233,7 +252,7 @@ export default function WhatIfTab() {
     const delay = nextMidnight.getTime() - now.getTime();
     const timer = setTimeout(() => run(), delay);
     return () => clearTimeout(timer);
-  }, [symbol, startDate, numericAmount]);
+  }, [symbol, startDate, numericAmount, priceCache]);
 
   // ✅ Dropdown click-away handler
   useEffect(() => {
@@ -269,52 +288,8 @@ export default function WhatIfTab() {
     setError("");
   };
 
-  // 🌙 Improved global style: date picker + tab button contrast
-  const globalStyle = `
-    /* Calendar icon fix */
-    input[type="date"]::-webkit-calendar-picker-indicator {
-      filter: none;
-    }
-    .dark input[type="date"]::-webkit-calendar-picker-indicator {
-      filter: invert(1) brightness(1.3);
-      opacity: 0.9;
-      cursor: pointer;
-    }
-
-    /* Firefox calendar fix */
-    @-moz-document url-prefix() {
-      .dark input[type="date"] {
-        filter: invert(1) brightness(1.4);
-      }
-    }
-
-    /* Tabs contrast fix */
-    .tab-btn {
-      transition: all 0.2s ease-in-out;
-      color: #1e293b;
-      background-color: #f8fafc;
-    }
-    .tab-btn:hover {
-      background-color: #e2e8f0;
-    }
-    .tab-btn.active {
-      background-color: #0284c7;
-      color: white;
-    }
-    .dark .tab-btn {
-      background-color: #1e293b;
-      color: #cbd5e1;
-    }
-    .dark .tab-btn.active {
-      background-color: #0ea5e9;
-      color: white;
-    }
-  `;
-
   return (
     <>
-      <style>{globalStyle}</style>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section className="panel">
           <h2 className="mb-4 text-xl font-bold">What if?</h2>
