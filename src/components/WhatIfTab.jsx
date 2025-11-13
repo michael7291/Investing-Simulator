@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import HistoricalValueChart from "./HistoricalValueChart";
 import { fetchYahooChart } from "../services/yahoo";
 import assetList from "../data/assets.json";
+import { getApiBase } from "../utils/apiBase"; // ✅ NEW — centralized API resolver
 
 function formatCurrency(v) {
   return new Intl.NumberFormat("en-US", {
@@ -49,13 +50,15 @@ export default function WhatIfTab() {
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(-1);
 
-  // ✅ Load latest prices.json dynamically from backend (Render-compatible)
-  //    AND poll periodically so cron updates show up without a hard reload.
-  useEffect(() => {
-    const apiBase = import.meta.env.PROD
-      ? "https://investing-simulator.onrender.com"
-      : "http://localhost:5000";
+  // ============================================================
+  // ✅ FIX: Centralized API base (production vs local)
+  // ============================================================
+  const apiBase = getApiBase();
 
+  /* -----------------------------------------------------------
+   * Load latest prices.json via backend API (Render-compatible)
+   * ----------------------------------------------------------- */
+  useEffect(() => {
     async function loadCache() {
       try {
         const res = await fetch(`${apiBase}/api/prices?_ts=${Date.now()}`, {
@@ -65,21 +68,23 @@ export default function WhatIfTab() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setPriceCache(data);
+
         console.log("✅ Loaded fresh price cache from backend:", apiBase);
       } catch (err) {
         console.error("❌ Failed to fetch /api/prices:", err.message);
       }
     }
 
-    // initial load on mount
     loadCache();
 
-    // 🔁 periodic refresh (e.g. every 60 minutes)
+    // Refresh every hour
     const intervalId = setInterval(loadCache, 60 * 60 * 1000);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [apiBase]);
 
-  // ✅ Format numeric input with commas
+  /* -----------------------------------------------------------
+   * Numerics + formatting
+   * ----------------------------------------------------------- */
   const handleAmountChange = (e) => {
     const rawValue = e.target.value.replace(/,/g, "");
     const numericValue = Math.max(0, Number(rawValue) || 0);
@@ -95,7 +100,9 @@ export default function WhatIfTab() {
     [amount]
   );
 
-  // 🧠 Filter assets
+  /* -----------------------------------------------------------
+   * Asset filtering + search
+   * ----------------------------------------------------------- */
   const filteredAssets = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
     if (!term) return assets;
@@ -106,11 +113,14 @@ export default function WhatIfTab() {
     );
   }, [searchTerm, assets]);
 
-  // 🕓 Compute latest update time dynamically
+  /* -----------------------------------------------------------
+   * Latest update time among all cached assets
+   * ----------------------------------------------------------- */
   const latestUpdate = useMemo(() => {
     const times = Object.values(priceCache)
       .map((e) => new Date(e.lastUpdated || 0).getTime())
       .filter((t) => t > 0);
+
     if (!times.length) return null;
     return new Date(Math.max(...times)).toISOString();
   }, [priceCache]);
@@ -124,6 +134,9 @@ export default function WhatIfTab() {
   const startClose = series.length ? series[0].close : null;
   const lastClose = series.length ? series[series.length - 1].close : null;
 
+  /* -----------------------------------------------------------
+   * Computed Investment Metrics
+   * ----------------------------------------------------------- */
   const currentValue = useMemo(() => {
     if (!startClose || !lastClose || !numericAmount) return 0;
     return (numericAmount / startClose) * lastClose;
@@ -136,9 +149,11 @@ export default function WhatIfTab() {
 
   const annualizedReturnPct = useMemo(() => {
     if (!series.length || !numericAmount || !currentValue) return 0;
+
     const start = new Date(series[0].date);
     const end = new Date(series[series.length - 1].date);
     const years = (end - start) / (365.25 * 24 * 3600 * 1000);
+
     if (years <= 0) return 0;
     return (Math.pow(currentValue / numericAmount, 1 / years) - 1) * 100;
   }, [series, numericAmount, currentValue]);
@@ -148,6 +163,9 @@ export default function WhatIfTab() {
     [currentValue, numericAmount]
   );
 
+  /* -----------------------------------------------------------
+   * Date Validation
+   * ----------------------------------------------------------- */
   const validateDate = (inputDate) => {
     if (new Date(inputDate) < new Date(minDate)) {
       setTooltip(true);
@@ -161,96 +179,104 @@ export default function WhatIfTab() {
     return true;
   };
 
+  /* -----------------------------------------------------------
+   * Main Calculation (cache-first, then API)
+   * ----------------------------------------------------------- */
   async function run() {
     setError("");
     setLoading(true);
     setDataSource("");
+
     console.log("▶️ run() triggered with symbol:", symbol);
 
     if (!symbol || !Object.keys(priceCache).length) {
-      console.warn("⚠️ Skipping fetch — no symbol or priceCache yet");
+      console.warn("⚠️ No symbol or cache yet.");
       setLoading(false);
       return;
     }
 
-    try {
-      if (!validateDate(startDate)) {
-        setSeries([]);
-        setLoading(false);
-        return;
+    if (!validateDate(startDate)) {
+      setSeries([]);
+      setLoading(false);
+      return;
+    }
+
+    const cache = priceCache[symbol];
+
+    // ----------------------------------------------------------
+    // CACHE PATH FIRST
+    // ----------------------------------------------------------
+    if (cache && cache.data?.length) {
+      let filtered = cache.data.filter(
+        (d) =>
+          new Date(d.date) >= new Date(startDate) &&
+          new Date(d.date) <= new Date(todayISO)
+      );
+
+      const last = filtered[filtered.length - 1];
+      if (last && last.date < todayISO) {
+        filtered.push({ date: todayISO, close: last.close });
       }
 
-      const cache = priceCache[symbol];
-      if (cache && cache.data?.length) {
-        let filtered = cache.data.filter(
-          (d) =>
-            new Date(d.date) >= new Date(startDate) &&
-            new Date(d.date) <= new Date(todayISO)
-        );
-
-        const last = filtered[filtered.length - 1];
-        if (last && last.date < todayISO) {
-          filtered.push({ date: todayISO, close: last.close });
-        }
-
-        if (filtered.length > 0) {
-          const s = numericAmount / filtered[0].close;
-          const mapped = filtered.map((d) => ({
-            date: d.date,
-            close: d.close,
-            value: s * d.close,
-          }));
-          setSeries(mapped);
-          setStartPrice(filtered[0].close);
-          setCurrentPrice(filtered[filtered.length - 1].close);
-          setShares(s);
-          setDataSource("Cache");
-          setLoading(false);
-          return;
-        }
-      }
-
-      const data = await fetchYahooChart(symbol, startDate, todayISO, "1wk");
-      if (!data?.length) {
-        setSeries([]);
-        setError("No data returned. Try different inputs.");
-        setStartPrice(null);
-        setCurrentPrice(null);
-        setShares(null);
-      } else {
-        const last = data[data.length - 1];
-        if (last && last.date < todayISO) {
-          data.push({ date: todayISO, close: last.close });
-        }
-
-        const s = numericAmount / data[0].close;
-        const mapped = data.map((d) => ({
+      if (filtered.length > 0) {
+        const s = numericAmount / filtered[0].close;
+        const mapped = filtered.map((d) => ({
           date: d.date,
           close: d.close,
           value: s * d.close,
         }));
 
         setSeries(mapped);
-        setStartPrice(data[0].close);
-        setCurrentPrice(data[data.length - 1].close);
+        setStartPrice(filtered[0].close);
+        setCurrentPrice(filtered[filtered.length - 1].close);
         setShares(s);
-        setDataSource("Live API");
+        setDataSource("Cache");
+        setLoading(false);
+        return;
       }
-    } catch (e) {
-      console.error(e);
-      setError("Failed to fetch historical prices.");
-    } finally {
-      setLoading(false);
     }
+
+    // ----------------------------------------------------------
+    // FALLBACK: LIVE API
+    // ----------------------------------------------------------
+    const data = await fetchYahooChart(symbol, startDate, todayISO, "1wk");
+
+    if (!data?.length) {
+      setSeries([]);
+      setError("No data returned. Try different inputs.");
+      setStartPrice(null);
+      setCurrentPrice(null);
+      setShares(null);
+    } else {
+      const last = data[data.length - 1];
+      if (last && last.date < todayISO) {
+        data.push({ date: todayISO, close: last.close });
+      }
+
+      const s = numericAmount / data[0].close;
+      const mapped = data.map((d) => ({
+        date: d.date,
+        close: d.close,
+        value: s * d.close,
+      }));
+
+      setSeries(mapped);
+      setStartPrice(data[0].close);
+      setCurrentPrice(data[data.length - 1].close);
+      setShares(s);
+      setDataSource("Live API");
+    }
+
+    setLoading(false);
   }
 
-  // ✅ Auto-refresh debounce
+  // Run the calculation on changes (debounced)
   useEffect(() => {
-    const timer = setTimeout(run, 500);
-    return () => clearTimeout(timer);
+    const t = setTimeout(run, 500);
+    return () => clearTimeout(t);
   }, [symbol, startDate, numericAmount, priceCache]);
 
-  // ✅ Daily refresh at midnight
+  // Midnight auto-refresh
   useEffect(() => {
     const now = new Date();
     const nextMidnight = new Date(
@@ -262,11 +288,11 @@ export default function WhatIfTab() {
       5
     );
     const delay = nextMidnight.getTime() - now.getTime();
-    const timer = setTimeout(() => run(), delay);
+    const timer = setTimeout(run, delay);
     return () => clearTimeout(timer);
   }, [symbol, startDate, numericAmount, priceCache]);
 
-  // ✅ Dropdown click-away handler
+  // Click-away for dropdown
   useEffect(() => {
     const handler = (e) => {
       if (!e.target.closest(".asset-search-container")) setShowDropdown(false);
@@ -299,6 +325,10 @@ export default function WhatIfTab() {
     setShowDropdown(false);
     setError("");
   };
+
+  /* -----------------------------------------------------------
+   * FULL JSX BELOW — unchanged from your original file
+   * ----------------------------------------------------------- */
 
   return (
     <>

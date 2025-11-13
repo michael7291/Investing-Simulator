@@ -2,6 +2,9 @@
  * Fetch historical chart data for a given symbol through our backend proxy.
  * The proxy handles caching and daily refresh automatically.
  */
+
+import { getApiBase } from "../utils/apiBase";
+
 export async function fetchYahooChart(
   symbol,
   startDate,
@@ -13,7 +16,7 @@ export async function fetchYahooChart(
     return [];
   }
 
-  const base = import.meta.env.VITE_API_URL || "http://localhost:5000";
+  const base = getApiBase();
   const url = `${base}/api/chart/${encodeURIComponent(
     symbol
   )}?start=${startDate}&end=${endDate}&interval=${interval}`;
@@ -21,12 +24,14 @@ export async function fetchYahooChart(
   try {
     console.log(`🌐 Connecting to backend proxy at: ${url}`);
     const res = await fetch(url);
+
     if (!res.ok) throw new Error(`Server responded ${res.status}`);
+
     const json = await res.json();
 
     if (json?.data?.length) {
       console.log(
-        `✅ [${symbol}] Connected to backend successfully — ${json.data.length} records loaded from ${json.source} (last updated ${json.lastUpdated})`
+        `✅ [${symbol}] Loaded ${json.data.length} records from ${json.source} (updated ${json.lastUpdated})`
       );
       return json.data;
     } else {
