@@ -50,13 +50,14 @@ export default function WhatIfTab() {
   const [highlightIndex, setHighlightIndex] = useState(-1);
 
   // ✅ Load latest prices.json dynamically from backend (Render-compatible)
+  //    AND poll periodically so cron updates show up without a hard reload.
   useEffect(() => {
+    const apiBase = import.meta.env.PROD
+      ? "https://investing-simulator.onrender.com"
+      : "http://localhost:5000";
+
     async function loadCache() {
       try {
-        const apiBase = import.meta.env.PROD
-          ? "https://investing-simulator.onrender.com"
-          : "http://localhost:5000";
-
         const res = await fetch(`${apiBase}/api/prices?_ts=${Date.now()}`, {
           headers: { Accept: "application/json" },
         });
@@ -69,7 +70,13 @@ export default function WhatIfTab() {
         console.error("❌ Failed to fetch /api/prices:", err.message);
       }
     }
+
+    // initial load on mount
     loadCache();
+
+    // 🔁 periodic refresh (e.g. every 60 minutes)
+    const intervalId = setInterval(loadCache, 60 * 60 * 1000);
+    return () => clearInterval(intervalId);
   }, []);
 
   // ✅ Format numeric input with commas
