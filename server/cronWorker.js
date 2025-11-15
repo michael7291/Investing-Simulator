@@ -1,27 +1,43 @@
 // server/cronWorker.js
+// Feature-flag controlled cron worker.
+// Cron is OFF by default unless ENABLE_CRON=true
+
 import cron from "node-cron";
-import { update } from "../scripts/updateCache.js";
+import updateIncremental from "../scripts/updateCache.js"; // 1-year incremental updater
 
-console.log("🕓 Yahoo Finance cache worker started");
+const ENABLE_CRON =
+  String(process.env.ENABLE_CRON || "false").toLowerCase() === "true";
 
-// run once on boot (so it's fresh right after deploy)
-(async () => {
-  try {
-    console.log("⚡ Running initial cache update...");
-    await update();
-    console.log("✅ Initial cache update complete");
-  } catch (err) {
-    console.error("❌ Initial cache update failed:", err.message);
-  }
-})();
+console.log("🕓 cronWorker.js loaded");
+console.log(`🔧 ENABLE_CRON = ${ENABLE_CRON}`);
 
-// run every day at 00:05 UTC
-cron.schedule("5 0 * * *", async () => {
-  try {
-    console.log("🔁 [CRON] Updating cached prices from Yahoo Finance...");
-    await update();
-    console.log("✅ [CRON] Cache updated at", new Date().toISOString());
-  } catch (err) {
-    console.error("❌ [CRON] Cache update failed:", err.message);
-  }
-});
+if (!ENABLE_CRON) {
+  console.log(
+    "⏸️ Cron worker disabled — no Yahoo Finance automatic updates will run."
+  );
+  // No exports needed. File is inert.
+} else {
+  console.log("⚡ Cron worker enabled — starting scheduled jobs...");
+
+  // Run once on startup
+  (async () => {
+    try {
+      console.log("⚡ Running initial incremental cache update...");
+      await updateIncremental();
+      console.log("✅ Initial cache update complete");
+    } catch (err) {
+      console.error("❌ Initial cache update failed:", err.message);
+    }
+  })();
+
+  // Run daily at 00:05 UTC
+  cron.schedule("5 0 * * *", async () => {
+    try {
+      console.log("🔁 [CRON] Daily incremental update…");
+      await updateIncremental();
+      console.log("✅ [CRON] Cache updated");
+    } catch (err) {
+      console.error("❌ [CRON] Cache update failed:", err.message);
+    }
+  });
+}

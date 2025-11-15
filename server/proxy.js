@@ -6,20 +6,23 @@ import cron from "node-cron";
 import fs from "fs";
 import path from "path";
 
-import updateIncremental from "../scripts/updateCache.js"; // incremental updater (1 yr of data)
-import updateFull from "../scripts/cachePrices.js"; // full rebuild from inception
+import updateIncremental from "../scripts/updateCache.js"; // incremental updater
+import updateFull from "../scripts/cachePrices.js"; // full rebuild
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Optional: simple shared secret for admin actions
+// Optional admin secret
 const ADMIN_SECRET = process.env.ADMIN_SECRET || null;
+
+// Feature flag: enable/disable cron
+const ENABLE_CRON =
+  String(process.env.ENABLE_CRON || "false").toLowerCase() === "true";
 
 // ------------------------------
 // Paths
 // ------------------------------
-
 const __dirname = path.resolve();
 const assetsPath = path.join(__dirname, "src", "data", "assets.json");
 const pricesPath = path.join(__dirname, "src", "data", "prices.json");
@@ -31,7 +34,6 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 // ------------------------------
 // Load assets.json
 // ------------------------------
-
 try {
   assets = JSON.parse(fs.readFileSync(assetsPath, "utf-8"));
   console.log(`📘 Loaded ${assets.length} assets`);
@@ -40,15 +42,15 @@ try {
 }
 
 // ------------------------------
-// Load prices.json into memory cache
+// Load price cache
 // ------------------------------
-
 function loadPricesFromDisk() {
   try {
     if (!fs.existsSync(pricesPath)) {
       console.warn("⚠️ No prices.json found");
       return;
     }
+
     const priceData = JSON.parse(fs.readFileSync(pricesPath, "utf-8"));
     memoryCache = {};
 
@@ -58,6 +60,7 @@ function loadPricesFromDisk() {
         data: entry.data,
       };
     }
+
     console.log(
       `💾 Loaded ${Object.keys(memoryCache).length} symbols from prices.json`
     );
@@ -66,13 +69,11 @@ function loadPricesFromDisk() {
   }
 }
 
-// Load on startup
 loadPricesFromDisk();
 
 // ------------------------------
 // Persist memory cache to disk
 // ------------------------------
-
 function persistCache() {
   try {
     const out = {};
@@ -90,9 +91,8 @@ function persistCache() {
 }
 
 // ------------------------------
-// Yahoo fetcher
+// Yahoo fetcher (LIVE API)
 // ------------------------------
-
 async function fetchYahooChart(symbol, startDate, endDate, interval = "1d") {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&period1=${Math.floor(
     new Date(startDate).getTime() / 1000
@@ -106,6 +106,7 @@ async function fetchYahooChart(symbol, startDate, endDate, interval = "1d") {
   if (!result?.timestamp) return [];
 
   const quotes = result.indicators?.quote?.[0];
+
   return result.timestamp.map((t, i) => ({
     date: new Date(t * 1000).toISOString().slice(0, 10),
     close: quotes.close[i],
@@ -113,9 +114,8 @@ async function fetchYahooChart(symbol, startDate, endDate, interval = "1d") {
 }
 
 // ------------------------------
-// Helper: freshness check
+// Freshness check
 // ------------------------------
-
 function isFresh(symbol) {
   const entry = memoryCache[symbol];
   if (!entry || !entry.lastUpdated) return false;
@@ -123,9 +123,8 @@ function isFresh(symbol) {
 }
 
 // ------------------------------
-// Endpoint: Chart data
+// GET /api/chart/:symbol
 // ------------------------------
-
 app.get("/api/chart/:symbol", async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   const {
@@ -135,6 +134,7 @@ app.get("/api/chart/:symbol", async (req, res) => {
   } = req.query;
 
   try {
+    // Serve from cache
     if (isFresh(symbol) && memoryCache[symbol]?.data) {
       return res.json({
         source: "cache",
@@ -143,19 +143,21 @@ app.get("/api/chart/:symbol", async (req, res) => {
       });
     }
 
+    // Live fetch
     const data = await fetchYahooChart(symbol, start, end, interval);
+
     memoryCache[symbol] = {
       lastUpdated: new Date().toISOString(),
       data,
     };
+
+    persistCache();
 
     res.json({
       source: "live",
       lastUpdated: memoryCache[symbol].lastUpdated,
       data,
     });
-
-    persistCache();
   } catch (err) {
     console.error(`❌ Fetch error for ${symbol}:`, err.message);
 
@@ -172,9 +174,8 @@ app.get("/api/chart/:symbol", async (req, res) => {
 });
 
 // ------------------------------
-// Endpoint: Serve raw prices.json
+// GET /api/prices
 // ------------------------------
-
 app.get("/api/prices", (req, res) => {
   try {
     if (fs.existsSync(pricesPath)) {
@@ -189,9 +190,8 @@ app.get("/api/prices", (req, res) => {
 });
 
 // ------------------------------
-// Admin route: Manual incremental update
+// POST /api/admin/update-cache
 // ------------------------------
-
 app.post("/api/admin/update-cache", async (req, res) => {
   if (ADMIN_SECRET && req.headers["x-admin-secret"] !== ADMIN_SECRET) {
     return res.status(403).json({ error: "Forbidden" });
@@ -208,42 +208,47 @@ app.post("/api/admin/update-cache", async (req, res) => {
 });
 
 // ------------------------------
-// Admin route: Manual FULL rebuild
+// POST /api/admin/run-daily-cron
 // ------------------------------
-
 app.post("/api/admin/run-daily-cron", async (req, res) => {
   if (ADMIN_SECRET && req.headers["x-admin-secret"] !== ADMIN_SECRET) {
     return res.status(403).json({ error: "Forbidden" });
   }
 
   try {
-    console.log("🧪 Manual daily full refresh triggered…");
+    console.log("🧪 Manual FULL rebuild triggered…");
     await updateFull();
     loadPricesFromDisk();
-    res.json({ ok: true, message: "Full cron job completed" });
+    res.json({ ok: true, message: "Full rebuild complete" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // ------------------------------
-// Integrated Daily Cron Job
+// Integrated Daily Cron Job (Feature Flag)
 // ------------------------------
+console.log(`🔧 ENABLE_CRON = ${ENABLE_CRON}`);
 
-cron.schedule("5 0 * * *", async () => {
-  try {
-    console.log("🔁 [CRON] Running daily incremental update…");
-    await updateIncremental();
-    loadPricesFromDisk();
-    console.log("✅ [CRON] Completed");
-  } catch (err) {
-    console.error("❌ [CRON] Failed:", err.message);
-  }
-});
+if (!ENABLE_CRON) {
+  console.log("⏸️ Cron job disabled — no automatic Yahoo calls will run.");
+} else {
+  console.log("⚡ Cron job ENABLED — scheduling tasks...");
+
+  cron.schedule("5 0 * * *", async () => {
+    try {
+      console.log("🔁 [CRON] Daily incremental update…");
+      await updateIncremental();
+      loadPricesFromDisk();
+      console.log("✅ [CRON] Completed");
+    } catch (err) {
+      console.error("❌ [CRON] Failed:", err.message);
+    }
+  });
+}
 
 // ------------------------------
 // Start server
 // ------------------------------
-
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🌐 Backend server running on ${PORT}`));
